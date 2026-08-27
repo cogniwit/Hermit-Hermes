@@ -95,7 +95,7 @@ Hermes\                   Hermes 应用与运行环境（可整个打包分发�
 
 `Hermit-Hermes.ps1` 自身通过 GitHub Releases 发布并自动更新：
 
-- 每次运行会先检查最新版本（`qzry/Hermit-Hermes` 仓库），有新版本必须先更新，通过后才能进入构建流程
+- 每次运行会先检查最新版本（`cogniwit/Hermit-Hermes` 仓库），有新版本必须先更新，通过后才能进入构建流程
 - 更新时下载 `Hermit-Hermes.ps1`，SHA-256 直接取自 GitHub 官方为资产计算的 digest，校验通过后替换自身，并提示重新运行
 - 检查失败（网络不通、仓库无 Release、资产缺失或校验失败）会阻止构建，避免使用未知或损坏的脚本
 

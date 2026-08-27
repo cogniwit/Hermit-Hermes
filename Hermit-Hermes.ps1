@@ -3,7 +3,7 @@ Hermit-Hermes：Hermes Desktop 便携构建与更新工具（安装/更新一体
 
 作者：轻舟入屿
 联系方式：onewit@qq.com
-版本：v1.0.3
+版本：v1.0.4
 
 常规使用：
   .\Hermit-Hermes.ps1
@@ -126,8 +126,8 @@ try {
     $script:SourceRepo = 'https://github.com/NousResearch/hermes-agent.git'
     $script:GitHubHeaders = @{ 'User-Agent' = 'Hermes-Builder' }
     # 脚本自更新：发布在 GitHub Releases（Hermit-Hermes.ps1，SHA-256 取自官方 digest）
-    $script:ScriptVersion = 'v1.0.3'
-    $script:RepoOwner = 'qzry'
+    $script:ScriptVersion = 'v1.0.4'
+    $script:RepoOwner = 'cogniwit'
     $script:RepoName = 'Hermit-Hermes'
     $script:LogFile = $null
     $script:LogWriter = $null
