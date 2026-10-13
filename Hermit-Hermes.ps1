@@ -3,7 +3,7 @@ Hermit-Hermes：Hermes Desktop 便携构建与更新工具（安装/更新一体
 
 作者：轻舟入屿
 联系方式：onewit@qq.com
-版本：v1.0.4
+版本：v1.0.5
 
 常规使用：
   .\Hermit-Hermes.ps1
@@ -126,7 +126,7 @@ try {
     $script:SourceRepo = 'https://github.com/NousResearch/hermes-agent.git'
     $script:GitHubHeaders = @{ 'User-Agent' = 'Hermes-Builder' }
     # 脚本自更新：发布在 GitHub Releases（Hermit-Hermes.ps1，SHA-256 取自官方 digest）
-    $script:ScriptVersion = 'v1.0.4'
+    $script:ScriptVersion = 'v1.0.5'
     $script:RepoOwner = 'cogniwit'
     $script:RepoName = 'Hermit-Hermes'
     $script:LogFile = $null
@@ -1550,7 +1550,7 @@ function Install-AgentRuntime {
     $uv = Join-Path $Runtime 'uv\bin\uv.exe'
     $pythonVersion = Get-RequiredPythonVersion -Source $Source
     Invoke-External -FilePath $uv -Arguments @('python', 'install', $pythonVersion) -WorkingDirectory $agent -Environment $environment -Quiet -Activity "Installing bundled Python $pythonVersion" -LogSource 'uv'
-    New-StandardPortableVenv -Runtime $Runtime -Agent $agent -Environment $environment -SkipSync
+    New-StandardPortableVenv -Runtime $Runtime -Agent $agent -Environment $environment -PythonVersion $pythonVersion -SkipSync
 
     # 并行阶段：uv sync（Python 依赖）与 npm ci（Node 依赖）互不依赖，
     # 并发执行可节省约一分钟
@@ -1979,18 +1979,45 @@ function Repair-PortableRelocation {
     }
 
     $environment = Get-PortableEnvironment -Runtime $runtime -Data (Join-Path $script:HermesDir 'data') -NodeCache (Join-Path $script:BuildDir 'cache\npm')
-    Invoke-External -FilePath (Join-Path $venv 'Scripts\python.exe') -Arguments @('-c', 'import hermes_cli, dotenv, openai, rich, prompt_toolkit') -WorkingDirectory $agent -Environment $environment -Quiet -LogSource 'verify'
+    # 旧安装可能来自一次未完成的升级，第三方依赖与 venv Python ABI 不一致。
+    # 更新流程应继续构建新候选并在发布前完整验证，而不是被旧环境的导入错误阻断。
+    Invoke-External -FilePath (Join-Path $venv 'Scripts\python.exe') -Arguments @('-c', 'import sys; assert sys.executable and sys.prefix != sys.base_prefix; print(sys.version)') -WorkingDirectory $agent -Environment $environment -Quiet -Activity 'Verifying the existing Python environment' -LogSource 'verify'
     Write-Ok 'Portable paths are valid for the current Hermes directory.'
 }
 
 function Get-PortableBasePython {
-    # 定位创建 venv 所用的 uv 托管 CPython
-    param([string]$Runtime)
+    # 定位创建 venv 所用的 uv 托管 CPython。
+    # 同一运行时可能同时缓存多个 Python 版本；优先读取 venv 的 home，
+    # 避免递归扫描时误选到与 venv 不兼容的解释器。
+    param([string]$Runtime, [string]$RequiredVersion = '')
 
-    $candidate = Get-ChildItem -LiteralPath (Join-Path $Runtime 'python') -Recurse -File -Filter 'python.exe' |
-        Where-Object { $_.Directory.Name -match '^cpython-.*-windows-x86_64-none$' } |
+    $venvConfig = Join-Path $Runtime 'agent\venv\pyvenv.cfg'
+    if (Test-Path -LiteralPath $venvConfig) {
+        try {
+            $homeLine = Get-Content -LiteralPath $venvConfig -ErrorAction Stop |
+                Where-Object { $_ -match '^\s*home\s*=\s*(.+?)\s*$' } |
+                Select-Object -First 1
+            if ($homeLine -and $homeLine -match '^\s*home\s*=\s*(.+?)\s*$') {
+                $home = $Matches[1].Trim().Trim('"')
+                $venvPython = Join-Path $home 'python.exe'
+                if (Test-Path -LiteralPath $venvPython) { return $venvPython }
+            }
+        }
+        catch { }
+    }
+
+    $pythonRoot = Join-Path $Runtime 'python'
+    $candidate = Get-ChildItem -LiteralPath $pythonRoot -Recurse -File -Filter 'python.exe' |
+        Where-Object {
+            $_.Directory.Name -match '^cpython-.*-windows-x86_64-none$' -and
+            (-not $RequiredVersion -or $_.Directory.Name -match ('^cpython-' + [regex]::Escape($RequiredVersion) + '(?:\.|-).*windows-x86_64-none$'))
+        } |
+        Sort-Object FullName -Descending |
         Select-Object -First 1
-    if (-not $candidate) { throw "Bundled CPython is missing below: $(Join-Path $Runtime 'python')" }
+    if (-not $candidate -and $RequiredVersion) {
+        throw "Bundled CPython $RequiredVersion is missing below: $pythonRoot"
+    }
+    if (-not $candidate) { throw "Bundled CPython is missing below: $pythonRoot" }
     return $candidate.FullName
 }
 
@@ -1999,6 +2026,7 @@ function New-StandardPortableVenv {
         [string]$Runtime,
         [string]$Agent,
         [hashtable]$Environment,
+        [string]$PythonVersion = '',
         [switch]$SkipSync
     )
 
@@ -2007,7 +2035,7 @@ function New-StandardPortableVenv {
         throw "Refusing to overwrite an existing venv: $venv"
     }
 
-    $basePython = Get-PortableBasePython -Runtime $Runtime
+    $basePython = Get-PortableBasePython -Runtime $Runtime -RequiredVersion $PythonVersion
     # uv 托管的 CPython 刻意不带可用的 ensurepip 包，
     # uv 自行安装锁定的依赖，因此创建不带 pip 的标准 venv，
     # 而不是退化为 uv 跳板 venv
@@ -2067,8 +2095,10 @@ function Test-PortableInstall {
     $environment = Get-PortableEnvironment -Runtime $runtime -Data (Join-Path $script:HermesDir 'data') -NodeCache (Join-Path $script:BuildDir 'cache\npm')
     Invoke-External -FilePath (Join-Path $runtime 'agent\venv\Scripts\python.exe') -Arguments @('-c', 'import hermes_cli, dotenv, openai, rich, prompt_toolkit') -WorkingDirectory (Join-Path $runtime 'agent') -Environment $environment -Quiet -Activity 'Verifying the Agent runtime' -LogSource 'verify'
     $basePython = Get-PortableBasePython -Runtime $runtime
-    $environment.PYTHONPATH = (Join-Path $runtime 'agent\venv\Lib\site-packages')
-    Invoke-External -FilePath $basePython -Arguments @('-c', 'import hermes_cli, dotenv, openai, rich, prompt_toolkit') -WorkingDirectory (Join-Path $runtime 'agent') -Environment $environment -Quiet -Activity 'Verifying bundled Python' -LogSource 'verify'
+    # 基础 CPython 与 venv 可能不是同一版本（例如项目依赖触发 Python 3.14），
+    # 不能通过 PYTHONPATH 强行加载 venv 的第三方二进制扩展（如 pydantic_core）。
+    # venv Python 已负责验证完整依赖；这里仅验证 bundled Python 自身可执行且标准库正常。
+    Invoke-External -FilePath $basePython -Arguments @('-c', 'import sys, os; assert sys.executable and sys.version_info >= (3, 11); print(sys.version)') -WorkingDirectory (Join-Path $runtime 'agent') -Environment $environment -Quiet -Activity 'Verifying bundled Python' -LogSource 'verify'
     Invoke-External -FilePath (Join-Path $script:HermesDir 'tools\ripgrep\rg.exe') -Arguments @('--version') -Environment $environment -Quiet -Activity 'Verifying ripgrep' -LogSource 'verify'
     Invoke-External -FilePath (Join-Path $script:HermesDir 'tools\ffmpeg\ffmpeg.exe') -Arguments @('-version') -Environment $environment -Quiet -Activity 'Verifying FFmpeg' -LogSource 'verify'
     Write-Ok 'Portable runtime files and core imports are valid.'
