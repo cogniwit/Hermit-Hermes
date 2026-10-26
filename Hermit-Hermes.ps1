@@ -3,19 +3,19 @@ Hermit-Hermes：Hermes Desktop 便携构建与更新工具（安装/更新一体
 
 作者：轻舟入屿
 联系方式：onewit@qq.com
-版本：v1.0.5
+版本：v1.0.6
 
 常规使用：
   .\Hermit-Hermes.ps1
 
 构建指定正式版：
-  .\Hermit-Hermes.ps1 -Tag v2026.8.3
+  .\Hermit-Hermes.ps1 -tag v0.22.5
 
 列出可安装的正式版本（最近 10 个）：
-  .\Hermit-Hermes.ps1 -Tag
+  .\Hermit-Hermes.ps1 -tag
 
 列出全部历史版本：
-  .\Hermit-Hermes.ps1 -Tag listall
+  .\Hermit-Hermes.ps1 -tag listall
 
 构建失败后保留临时源码工作树：
   .\Hermit-Hermes.ps1 -KeepBuild
@@ -38,12 +38,12 @@ param(
     [Parameter(Position = 1)]
     [string]$Root = '',
 
-    # 指定构建版本；不写 -Tag 表示最新的非预发布 GitHub Release，
-    # 写 -Tag 但不带值时列出可安装版本
-    [Alias('Tag')]
+    # 指定构建版本；不写 -tag 表示最新的非预发布 GitHub Release，
+    # 写 -tag 但不带值时列出可安装版本
+    [Alias('tag')]
     [switch]$TagFlag,
 
-    # 收集 -Tag 后面的版本号（-Tag 声明为 switch 以支持空值；版本号作为位置参数优先绑定到这里）
+    # 收集 -tag 后面的版本号（-tag 声明为 switch 以支持空值；版本号作为位置参数优先绑定到这里）
     [Parameter(Position = 0)]
     [string[]]$TagValues,
 
@@ -59,14 +59,14 @@ param(
 
 Set-StrictMode -Version Latest
 
-# -Tag 以 switch 形式声明以支持空值（.\Hermit-Hermes.ps1 -Tag 直接列出可安装版本）；
+# -tag 以 switch 形式声明以支持空值（.\Hermit-Hermes.ps1 -tag 直接列出可安装版本）；
 # 版本号经 TagValues 收集，规整为单个字符串
 $script:TagSpecified = $PSBoundParameters.ContainsKey('TagFlag')
 $Tag = if ($TagFlag) { if ($TagValues) { ($TagValues -join ' ').Trim() } else { '' } } else { '' }
-# 未写 -Tag 却出现裸参数时给出提示，避免被静默忽略
+# 未写 -tag 却出现裸参数时给出提示，避免被静默忽略
 if (-not $script:TagSpecified -and $TagValues) {
     Write-Host "Unrecognized argument(s): $($TagValues -join ' ')" -ForegroundColor Yellow
-    Write-Host 'Use -Tag <version> to build a specific version, or -Tag to list versions.' -ForegroundColor Gray
+    Write-Host 'Use -tag <version> to build a specific version, or -tag to list versions.' -ForegroundColor Gray
     return
 }
 
@@ -126,7 +126,7 @@ try {
     $script:SourceRepo = 'https://github.com/NousResearch/hermes-agent.git'
     $script:GitHubHeaders = @{ 'User-Agent' = 'Hermes-Builder' }
     # 脚本自更新：发布在 GitHub Releases（Hermit-Hermes.ps1，SHA-256 取自官方 digest）
-    $script:ScriptVersion = 'v1.0.5'
+    $script:ScriptVersion = 'v1.0.6'
     $script:RepoOwner = 'cogniwit'
     $script:RepoName = 'Hermit-Hermes'
     $script:LogFile = $null
@@ -948,7 +948,7 @@ function Ensure-BootstrapUv {
 }
 
 function Get-LatestStableTag {
-    # 查询 Hermes 最新正式版 tag（-Tag 已在调用方处理）
+    # 查询 Hermes 最新正式版 tag（-tag 已在调用方处理）
     $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/NousResearch/hermes-agent/releases/latest' -Headers $script:GitHubHeaders
     $releaseTag = ([string]$release.tag_name).Trim()
     if ($release.prerelease -or $release.draft -or $releaseTag -notmatch '^v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$') {
@@ -1039,9 +1039,39 @@ function Invoke-ScriptUpdateCheck {
     Write-Host "[Hermes] $script:SymOk Updated to $($release.tag_name). Please re-run the script to continue." -ForegroundColor Green
     return $true
 }
-function Test-DesktopSupported([string]$Tag) {
-    # Hermes Desktop（Electron 桌面端）自 v2026.6.5 起随上游引入；
-    # 更早版本只有 web/ui-tui，无法打包 Hermes.exe，构建直接拦截
+function Get-ReleasePackageVersion {
+    # 从 Release 元数据解析包版本，例如：
+    #   "Hermes Agent v0.16.0 (2026.6.5)" -> 0.16.0
+    #   "Hermes Agent v0.22.5"（tag 同为 v0.22.5）-> 0.22.5
+    # 日期式 tag（v2026.6.5）本身不是包版本，只有名称缺失时才退到语义化 tag
+    param([object]$Release)
+    if (-not $Release) { return $null }
+
+    $name = [string]$Release.name
+    if ($name) {
+        $nameMatch = [regex]::Match($name, '(?i)\bv(\d+)\.(\d+)\.(\d+)')
+        if ($nameMatch.Success) {
+            try {
+                return [version]('{0}.{1}.{2}' -f $nameMatch.Groups[1].Value, $nameMatch.Groups[2].Value, $nameMatch.Groups[3].Value)
+            }
+            catch { }
+        }
+    }
+
+    $tag = ([string]$Release.tag_name).Trim()
+    if ($tag -match '^v0\.(\d+)\.(\d+)$') {
+        return [version]("0.{0}.{1}" -f $Matches[1], $Matches[2])
+    }
+    return $null
+}
+
+function Test-DesktopSupported {
+    # 仅凭 tag 的兜底判定，用于拿不到 Release 元数据的场景。
+    # 语义化 tag v0.x 自 2026-10 起启用，此时桌面端早已存在；
+    # 日期式 tag 的桌面端起点是 v2026.6.5（对应 Hermes Agent v0.16.0）。
+    param([string]$Tag)
+    if ($Tag -match '^v0\.\d+\.\d+') { return $true }
+
     $min = @(2026, 6, 5)
     $parts = @((($Tag -replace '^v', '') -split '[.\-]') | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
     if ($parts.Count -lt 3) { return $false }
@@ -1053,12 +1083,19 @@ function Test-DesktopSupported([string]$Tag) {
     return $true
 }
 
-function Test-HermesTagExists {
-    # 向上游查询 -Tag 指定的版本是否存在（404 = 不存在；网络异常返回 $null 不拦截）
+function Test-ReleaseDesktopSupported {
+    # 以 Release 自身的包版本为准：>= v0.16.0 即包含 Hermes Desktop
+    param([object]$Release)
+    $packageVersion = Get-ReleasePackageVersion -Release $Release
+    if ($packageVersion) { return ($packageVersion -ge [version]'0.16.0') }
+    return Test-DesktopSupported -tag ([string]$Release.tag_name).Trim()
+}
+
+function Get-HermesReleaseByTag {
+    # 查询指定 tag 的 Release（404 = $false；网络异常返回 $null 不拦截）
     param([string]$Tag)
     try {
-        $null = Invoke-RestMethod -Uri "https://api.github.com/repos/NousResearch/hermes-agent/releases/tags/$Tag" -Headers $script:GitHubHeaders -TimeoutSec 15
-        return $true
+        return Invoke-RestMethod -Uri "https://api.github.com/repos/NousResearch/hermes-agent/releases/tags/$Tag" -Headers $script:GitHubHeaders -TimeoutSec 15
     }
     catch {
         $status = $null
@@ -1092,7 +1129,7 @@ function Get-HermesReleases {
 }
 
 function Show-AvailableVersions {
-    # -Tag（空）/ -Tag listall：列出可安装的正式版本，标注最新版与当前已安装版本
+    # -tag（空）/ -tag listall：列出可安装的正式版本，标注最新版与当前已安装版本
     param([switch]$All)
     $limit = if ($All) { 0 } else { 10 }
     $releases = Get-HermesReleases -MaxCount $limit
@@ -1108,8 +1145,8 @@ function Show-AvailableVersions {
         catch { $installedTag = '' }
     }
 
-    # 仅列出支持 Hermes Desktop 的版本（桌面端自 v2026.6.5 起提供）
-    $releases = @($releases | Where-Object { Test-DesktopSupported ([string]$_.tag_name).Trim() })
+    # 仅列出支持 Hermes Desktop 的版本（依据 Release 包版本判定，v0.16.0 起提供桌面端）
+    $releases = @($releases | Where-Object { Test-ReleaseDesktopSupported -Release $_ })
     if (-not $releases) { throw 'No Hermes releases with Hermes Desktop found.' }
     $latestTag = ([string]$releases[0].tag_name).Trim()
     Write-Host ''
@@ -1126,8 +1163,8 @@ function Show-AvailableVersions {
         Write-Host $line -ForegroundColor $color
     }
     Write-Host ''
-    Write-Host 'Older versions (before v2026.6.5) are hidden because they do not include Hermes Desktop.' -ForegroundColor Gray
-    Write-Host 'Usage: .\Hermit-Hermes.ps1 -Tag <version>   e.g. -Tag v2026.8.3' -ForegroundColor Gray
+    Write-Host 'Older versions (before Hermes Agent v0.16.0 / tag v2026.6.5) are hidden because they do not include Hermes Desktop.' -ForegroundColor Gray
+    Write-Host 'Usage: .\Hermit-Hermes.ps1 -tag <version>   e.g. -tag v0.22.5' -ForegroundColor Gray
     Write-Host ''
 }
 
@@ -1981,44 +2018,66 @@ function Repair-PortableRelocation {
     $environment = Get-PortableEnvironment -Runtime $runtime -Data (Join-Path $script:HermesDir 'data') -NodeCache (Join-Path $script:BuildDir 'cache\npm')
     # 旧安装可能来自一次未完成的升级，第三方依赖与 venv Python ABI 不一致。
     # 更新流程应继续构建新候选并在发布前完整验证，而不是被旧环境的导入错误阻断。
-    Invoke-External -FilePath (Join-Path $venv 'Scripts\python.exe') -Arguments @('-c', 'import sys; assert sys.executable and sys.prefix != sys.base_prefix; print(sys.version)') -WorkingDirectory $agent -Environment $environment -Quiet -Activity 'Verifying the existing Python environment' -LogSource 'verify'
+    try {
+        Invoke-External -FilePath (Join-Path $venv 'Scripts\python.exe') -Arguments @('-c', 'import sys; assert sys.executable and sys.prefix != sys.base_prefix; print(sys.version)') -WorkingDirectory $agent -Environment $environment -Quiet -Activity 'Verifying the existing Python environment' -LogSource 'verify'
+    }
+    catch {
+        # 旧环境即将被候选运行时替换，此处只提示；候选运行时仍会在发布前完整验证
+        Write-WarnPortable "Existing Python environment is unusable and will be rebuilt: $($_.Exception.Message)" -Source 'verify'
+    }
     Write-Ok 'Portable paths are valid for the current Hermes directory.'
 }
 
 function Get-PortableBasePython {
     # 定位创建 venv 所用的 uv 托管 CPython。
-    # 同一运行时可能同时缓存多个 Python 版本；优先读取 venv 的 home，
-    # 避免递归扫描时误选到与 venv 不兼容的解释器。
+    # 同一运行时可能同时缓存多个 Python 版本，目标版本按以下优先级确定：
+    # 调用方指定 > venv 的 home 目录名 > venv 的 version_info。
+    # 缺少可靠依据时不猜版本，避免选中与 venv ABI 不兼容的解释器。
     param([string]$Runtime, [string]$RequiredVersion = '')
 
     $venvConfig = Join-Path $Runtime 'agent\venv\pyvenv.cfg'
+    $recordedVersion = ''
     if (Test-Path -LiteralPath $venvConfig) {
         try {
-            $homeLine = Get-Content -LiteralPath $venvConfig -ErrorAction Stop |
-                Where-Object { $_ -match '^\s*home\s*=\s*(.+?)\s*$' } |
-                Select-Object -First 1
-            if ($homeLine -and $homeLine -match '^\s*home\s*=\s*(.+?)\s*$') {
-                $home = $Matches[1].Trim().Trim('"')
-                $venvPython = Join-Path $home 'python.exe'
-                if (Test-Path -LiteralPath $venvPython) { return $venvPython }
+            foreach ($line in (Get-Content -LiteralPath $venvConfig -ErrorAction Stop)) {
+                $homeMatch = [regex]::Match($line, '^\s*home\s*=\s*(.+?)\s*$')
+                if ($homeMatch.Success) {
+                    # 注意：$HOME 是 PowerShell 只读内置变量，此处不能复用该名称
+                    $baseHome = $homeMatch.Groups[1].Value.Trim().Trim('"')
+                    $venvPython = Join-Path $baseHome 'python.exe'
+                    if (Test-Path -LiteralPath $venvPython) { return $venvPython }
+                    # home 失效时仍可从目录名推导版本，例如 cpython-3.11.15-windows-x86_64-none
+                    $homeVersion = [regex]::Match((Split-Path -Leaf $baseHome), '^cpython-(\d+\.\d+)')
+                    if ($homeVersion.Success -and -not $recordedVersion) {
+                        $recordedVersion = $homeVersion.Groups[1].Value
+                    }
+                }
+                if (-not $recordedVersion) {
+                    $versionMatch = [regex]::Match($line, '^\s*version_info\s*=\s*(\d+\.\d+)')
+                    if ($versionMatch.Success) { $recordedVersion = $versionMatch.Groups[1].Value }
+                }
             }
         }
         catch { }
     }
 
+    $wanted = if ($RequiredVersion) { $RequiredVersion } else { $recordedVersion }
     $pythonRoot = Join-Path $Runtime 'python'
-    $candidate = Get-ChildItem -LiteralPath $pythonRoot -Recurse -File -Filter 'python.exe' |
-        Where-Object {
-            $_.Directory.Name -match '^cpython-.*-windows-x86_64-none$' -and
-            (-not $RequiredVersion -or $_.Directory.Name -match ('^cpython-' + [regex]::Escape($RequiredVersion) + '(?:\.|-).*windows-x86_64-none$'))
-        } |
-        Sort-Object FullName -Descending |
-        Select-Object -First 1
-    if (-not $candidate -and $RequiredVersion) {
-        throw "Bundled CPython $RequiredVersion is missing below: $pythonRoot"
+    $candidates = @(Get-ChildItem -LiteralPath $pythonRoot -Recurse -File -Filter 'python.exe' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -match '^cpython-.*-windows-x86_64-none$' })
+
+    if ($wanted) {
+        $pattern = '^cpython-' + [regex]::Escape($wanted) + '(?:\.|-).*windows-x86_64-none$'
+        $matched = @($candidates | Where-Object { $_.Directory.Name -match $pattern } | Sort-Object FullName -Descending)
+        if ($matched.Count -gt 0) { return $matched[0].FullName }
+        if ($RequiredVersion) { throw "Bundled CPython $RequiredVersion is missing below: $pythonRoot" }
+        throw "Bundled CPython $wanted recorded by the existing venv is missing below: $pythonRoot"
     }
-    if (-not $candidate) { throw "Bundled CPython is missing below: $pythonRoot" }
-    return $candidate.FullName
+
+    if ($candidates.Count -eq 1) { return $candidates[0].FullName }
+    if ($candidates.Count -eq 0) { throw "Bundled CPython is missing below: $pythonRoot" }
+    $found = ($candidates | ForEach-Object { $_.Directory.Name } | Sort-Object -Unique) -join ', '
+    throw "Cannot decide which bundled CPython to use (found: $found). The venv configuration is missing or unreadable: $venvConfig"
 }
 
 function New-StandardPortableVenv {
@@ -2473,19 +2532,19 @@ try {
         if ($Tag) {
             # 先做本地格式校验，再向上游确认版本存在，避免拼写错误/不存在的版本白跑构建
             if ($Tag -notmatch '^v\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$') {
-                Write-Host "Invalid -Tag value: $Tag" -ForegroundColor Yellow
-                Write-Host 'Use a valid version (e.g. -Tag v2026.8.3), -Tag listall to list versions, or -Tag to show the latest ones.' -ForegroundColor Gray
+                Write-Host "Invalid -tag value: $Tag" -ForegroundColor Yellow
+                Write-Host 'Use a valid version (e.g. -tag v0.22.5), -tag listall to list versions, or -tag to show the latest ones.' -ForegroundColor Gray
                 return
             }
-            $tagExists = Test-HermesTagExists -Tag $Tag
-            if ($tagExists -eq $false) {
+            $tagRelease = Get-HermesReleaseByTag -tag $Tag
+            if ($tagRelease -eq $false) {
                 Write-Host "Version $Tag does not exist on the upstream repository." -ForegroundColor Yellow
-                Write-Host 'Use -Tag listall to see all available versions.' -ForegroundColor Gray
+                Write-Host 'Use -tag listall to see all available versions.' -ForegroundColor Gray
                 return
             }
-            if (-not (Test-DesktopSupported $Tag)) {
-                Write-Host "Version $Tag cannot be built: Hermes Desktop was only introduced upstream in v2026.6.5, so earlier releases cannot produce Hermes.exe." -ForegroundColor Yellow
-                Write-Host 'Use -Tag listall to see versions that can be built.' -ForegroundColor Gray
+            if ($tagRelease -and -not (Test-ReleaseDesktopSupported -Release $tagRelease)) {
+                Write-Host "Version $Tag cannot be built: Hermes Desktop was only introduced upstream in Hermes Agent v0.16.0 (tag v2026.6.5), so earlier releases cannot produce Hermes.exe." -ForegroundColor Yellow
+                Write-Host 'Use -tag listall to see versions that can be built.' -ForegroundColor Gray
                 return
             }
         }
