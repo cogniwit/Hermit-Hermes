@@ -1,3 +1,5 @@
+# 由于上游更新缘故，即日起本项目不再维护更新！！！
+
 # Hermit-Hermes：Hermes Desktop 便携构建与更新工具
 
 Hermit（隐士）寓意本项目为其构建一个完全隔离、自包含的便携环境——不依赖系统环境，独立运行。
@@ -82,6 +84,19 @@ Hermes\                   Hermes 应用与运行环境（可整个打包分发�
 ```
 
 `Hermes\build\` 只用于加速后续构建与排查，分发前删除即可。分发请使用全新构建的版本，避免个人数据与大量缓存被意外带出。
+
+## 环境隔离与系统痕迹
+
+本构建器对上游源码 0 变更，所有隔离都在生成阶段通过注入的环境引导完成。
+
+- 私有目录变量 `HERMES_HOME`、`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`XDG_CONFIG_HOME`、`XDG_DATA_HOME`、`XDG_CACHE_HOME`、`XDG_STATE_HOME`、`HF_HOME`、`PIP_CACHE_DIR`、`TEMP`、`TMP` 全部指向 Hermes 目录内，上游默认的 `%LOCALAPPDATA%\hermes` 等路径也随之落回便携目录。
+- `hermes://` 协议处理器默认**不注册**：便携版会设置 `HERMES_DESKTOP_SKIP_PROTOCOL_REGISTRATION=1`，因此不会写入 `HKCU\Software\Classes`。若需要深度链接，可移除该变量后重启，代价是注册表会残留指向便携目录的处理程序。
+- 以下功能需要主动开启，开启后会写入系统状态，不属于便携范围：
+  - `hermes gateway install`：注册登录启动任务（`schtasks`），被组策略拦截时回退为 Startup 文件夹快捷方式
+  - computer-use 自动启动：注册 `cua-driver-serve` 计划任务
+  - `hermes uninstall`：读写 `HKCU\Environment` 与用户 `PATH`
+
+> 边界说明：以上约束覆盖 Hermes 应用自身的自动行为。Hermes 作为 Agent 仍可执行你或它自身发起的命令，因此命令本身的写入范围无法由构建脚本限制。若需要物理级隔离，请把整个 Hermes 目录放进 Windows Sandbox、独立用户账户或虚拟机中运行，并谨慎授予 shell 权限。
 
 ## 发布机制
 
