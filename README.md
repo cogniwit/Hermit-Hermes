@@ -152,26 +152,6 @@ Node.js LTS（OpenJS.NodeJS.LTS）→ %ProgramFiles%\nodejs（系统级 MSI，�
 ripgrep（BurntSushi.ripgrep.MSVC）、FFmpeg（Gyan.FFmpeg）→ 由 winget 管理
 ```
 
-## 开源协议
+## 许可证
 
-本项目采用 [MIT License](LICENSE) 发布，版权署名 `Cogniwit`。
-
-你可以自由使用、修改和分发本项目，包括商业用途，但需在副本或重要部分中保留上述版权声明与许可声明。软件按「现状」提供，不附带任何明示或默示担保。
-
-## 第三方组件
-
-本仓库只包含构建脚本，不分发上游代码。构建生成的 `Hermes\` 便携目录中，下列组件均由脚本在构建时从官方渠道下载，其版权与授权归各自作者所有：
-
-| 组件 | 用途 | 授权 |
-| --- | --- | --- |
-| Hermes Agent | 上游 Agent 源码 | MIT（Copyright (c) 2025 Nous Research） |
-| CPython | 内置 Python 运行时 | PSF License |
-| Node.js | 桌面端构建与运行 | MIT |
-| Git for Windows | 私有 Git 环境 | GPL-2.0 |
-| uv | Python 解释器与依赖管理 | MIT / Apache-2.0 双许可 |
-| ripgrep | 代码搜索 | MIT / Unlicense 双许可 |
-| FFmpeg | 音视频处理 | GPL（BtbN `win64-gpl` 静态构建） |
-| Playwright Chromium | 浏览器工具 | Chromium 及其第三方组件许可 |
-| Electron | 桌面端外壳 | MIT |
-
-构建产物中保留各组件自带的许可证文件，具体条款以其目录下的许可证文本为准。
+本项目使用 [MIT License](LICENSE) 发布。
