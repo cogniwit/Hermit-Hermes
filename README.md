@@ -1,4 +1,5 @@
-# 由于上游更新缘故，最后适用版本为 Hermes Agent v0.22.2。至此，本项目不再维护更新！！！
+# 由于上游更新缘故，本项目不再维护更新！！！
+## 最后适用版本为 Hermes Agent v0.22.2
 
 # Hermit-Hermes：Hermes Desktop 便携构建与更新工具
 
