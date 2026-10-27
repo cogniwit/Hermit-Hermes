@@ -1,6 +1,6 @@
 # 由于上游更新缘故，本项目不再维护更新！！！
 ## 最后适用版本为 Hermes Agent v0.22.2
-## 若有需要可直接在 Microsoft Store 下载 Hermes Agent
+## 若有需要可在 Microsoft Store 下载 Hermes Agent
 
 # Hermit-Hermes：Hermes Desktop 便携构建与更新工具
 
